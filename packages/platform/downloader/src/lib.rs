@@ -86,6 +86,7 @@ impl Builder {
           None => app
             .path()
             .download_dir()
+            .or_else(|_| app.path().home_dir().map(|home| home.join("Downloads")))
             .map_err(|error| format!("failed to resolve Downloads directory: {error}"))?,
         };
         let event_trigger = DownloaderEventTrigger::new(app.clone());
