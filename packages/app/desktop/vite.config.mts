@@ -105,7 +105,9 @@ export default defineConfig(
           return [
             // @ts-ignore
             wasm(),
-            legacy({ targets: ['ie >= 11'], renderModernChunks: false }),
+            ...(process.env.TAURI_ENV_PLATFORM
+              ? []
+              : [legacy({ targets: ['ie >= 11'], renderModernChunks: false })]),
             VueRouter({
               root: import.meta.dirname,
               dts: resolve(import.meta.dirname, 'typed-router.d.ts'),
