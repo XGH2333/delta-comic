@@ -1,16 +1,14 @@
 use std::{
-  ffi::c_void,
   fs::File,
   os::fd::FromRawFd,
   path::PathBuf,
-  sync::{Arc, Mutex, OnceLock, RwLock},
+  sync::{Arc, OnceLock, RwLock},
 };
 
 use jni::{
-  Env, EnvUnowned,
+  EnvUnowned,
   errors::ThrowRuntimeExAndDefault,
   objects::{JObject, JString},
-  refs::Global,
   sys::{jint, jstring},
 };
 use serde::de::DeserializeOwned;
@@ -44,8 +42,6 @@ static ENGINE: OnceLock<RegisteredEngine> = OnceLock::new();
 static ENGINE_INIT: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
 static EVENT_SINK: OnceLock<RwLock<Option<MobileEventSink>>> = OnceLock::new();
 static SECRET_RESOLVER: OnceLock<RwLock<Option<Arc<dyn SecretResolver>>>> = OnceLock::new();
-static CREDENTIAL_CONTEXT: OnceLock<Global<JObject<'static>>> = OnceLock::new();
-static CREDENTIAL_CONTEXT_INIT: OnceLock<Mutex<()>> = OnceLock::new();
 
 struct MobileSecretResolver;
 
@@ -61,40 +57,6 @@ impl SecretResolver for MobileSecretResolver {
       None => Ok(None),
     }
   }
-}
-
-fn initialize_credential_context(env: &mut Env<'_>, context: &JObject<'_>) -> crate::Result<()> {
-  let _guard = CREDENTIAL_CONTEXT_INIT
-    .get_or_init(|| Mutex::new(()))
-    .lock()
-    .unwrap_or_else(std::sync::PoisonError::into_inner);
-  if CREDENTIAL_CONTEXT.get().is_some() {
-    return Ok(());
-  }
-
-  let context = env.new_global_ref(context).map_err(|_| {
-    crate::Error::CredentialStore("Android credential context could not be retained".into())
-  })?;
-  let java_vm = env.get_java_vm().map_err(|_| {
-    crate::Error::CredentialStore("Android credential context could not access the JVM".into())
-  })?;
-  let java_vm_pointer = java_vm.get_raw() as *mut c_void;
-  let context_pointer = context.as_obj().as_raw() as *mut c_void;
-
-  // The global reference is retained for the process lifetime below, and the initialization gate
-  // guarantees this is the only call into ndk-context.
-  unsafe {
-    ndk_context::initialize_android_context(java_vm_pointer, context_pointer);
-  }
-  if let Err(context) = CREDENTIAL_CONTEXT.set(context) {
-    // ndk-context now owns the raw pointer contract. Preserve it even on this unreachable race so
-    // a failed bookkeeping update can never leave a dangling Java reference.
-    std::mem::forget(context);
-    return Err(crate::Error::CredentialStore(
-      "Android credential context initialization raced".into(),
-    ));
-  }
-  Ok(())
 }
 
 fn register_system_secret_resolver_if_missing() -> crate::Result<()> {
@@ -251,23 +213,14 @@ impl<R: Runtime> MobileDownloader<R> {
 #[allow(non_snake_case)]
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_deltacomic_downloader_NativeBridge_initializeCredentialContext(
-  mut env: EnvUnowned<'_>,
+  _env: EnvUnowned<'_>,
   _receiver: JObject<'_>,
-  context: JObject<'_>,
+  _context: JObject<'_>,
 ) -> jint {
-  env
-    .with_env(|env| -> jni::errors::Result<_> {
-      Ok({
-        match initialize_credential_context(env, &context) {
-          Ok(()) => 0,
-          Err(error) => {
-            tracing::error!("Android credential context initialization failed: {error}");
-            1
-          }
-        }
-      })
-    })
-    .resolve::<ThrowRuntimeExAndDefault>()
+  // The Android runtime initializes ndk-context while creating the activity, and the credential
+  // store reads that process-wide context. Initializing it again here trips ndk-context's
+  // single-initialization assertion and aborts the process, so this hook reports success.
+  0
 }
 
 #[allow(non_snake_case)]
