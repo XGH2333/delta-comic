@@ -87,9 +87,26 @@ jobs:
           mkdir -p dist
           find . -path '*/bundle/deb/*.deb' -exec cp -v {} dist/ \;
           ls -l dist
-          for f in dist/*.deb; do
-            dpkg-deb -I "$f"
-            sha256sum "$f"
+          deb=$(ls dist/*.deb | head -n1)
+          echo "::notice::deb file $(basename "$deb") size $(stat -c%s "$deb")"
+          dpkg-deb -f "$deb" Package Version Architecture Depends | while IFS= read -r line; do
+            echo "::notice::deb field ${line:0:700}"
+          done
+          sha256sum "$deb" | while IFS= read -r line; do
+            echo "::notice::sha256 ${line:0:700}"
+          done
+
+      - name: Verify package installs
+        run: |
+          deb=$(ls dist/*.deb | head -n1)
+          if apt-get install -y "./$deb" > /tmp/install.log 2>&1; then
+            echo "::notice::apt install ok"
+          else
+            msg=$(tail -c 1600 /tmp/install.log | tr '\n' ' ' | tr -d '\r')
+            echo "::error::apt install failed :: ${msg:0:800}"
+          fi
+          dpkg -s "$(dpkg-deb -f "$deb" Package)" 2>/dev/null | head -n 12 | while IFS= read -r line; do
+            echo "::notice::installed ${line:0:600}"
           done
 
       - name: Upload artifact
@@ -104,7 +121,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "arm64-deb-${{ github.run_number }}" dist/*.deb \
+          run-step "gh release" gh release create "arm64-deb-${{ github.run_number }}" dist/*.deb \
+            --repo "$GITHUB_REPOSITORY" \
             --title "Debian 13 arm64 build ${{ github.run_number }}" \
             --prerelease \
             --notes "Automated Debian 13 (trixie) arm64 build from ${{ github.sha }}."
