@@ -14,6 +14,45 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0, viewport-fit=cover"
     />
+    <script>
+      ;(function () {
+        var show = function (msg) {
+          var el = document.getElementById('__boot_error')
+          if (!el) {
+            el = document.createElement('pre')
+            el.id = '__boot_error'
+            el.style.cssText =
+              'position:fixed;left:0;top:0;right:0;z-index:2147483647;background:#fff;color:#c00;font:14px/1.4 monospace;white-space:pre-wrap;padding:12px;margin:0;max-height:70vh;overflow:auto'
+            document.documentElement.appendChild(el)
+          }
+          el.textContent += msg + '\n'
+        }
+        window.addEventListener(
+          'error',
+          function (e) {
+            if (e.target && (e.target.src || e.target.href)) show('RESOURCE FAIL: ' + (e.target.src || e.target.href))
+            else show('ERROR: ' + (e.message || e.type) + ' @ ' + (e.filename || '') + ':' + (e.lineno || ''))
+          },
+          true,
+        )
+        window.addEventListener('unhandledrejection', function (e) {
+          show('REJECTION: ' + (e.reason && (e.reason.stack || e.reason.message) || e.reason))
+        })
+        setTimeout(function () {
+          var app = document.getElementById('app')
+          show(
+            'BOOT CHECK 6s: appChildren=' +
+              (app ? app.childElementCount : 'no-app') +
+              '; scripts=' +
+              [].map
+                .call(document.scripts, function (s) {
+                  return s.src || 'inline'
+                })
+                .join(' | '),
+          )
+        }, 6000)
+      })()
+    </script>
     <link rel="shortcut icon" href="/favicon.png" type="image/x-icon" />
     <link rel="apple-touch-icon" href="/favicon.png" type="image/x-icon" />
   </head>
